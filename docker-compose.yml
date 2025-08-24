@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # Database Services
+  postgres:
+    image: timescale/timescaledb:latest-pg14
+    environment:
+      POSTGRES_DB: credtech
+      POSTGRES_USER: credtech_user
+      POSTGRES_PASSWORD: credtech_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/init.sql:/docker-entrypoint-initdb.d/init.sql
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # Backend Services
+  api:
+    build: ./api
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=postgresql://credtech_user:credtech_pass@postgres:5432/credtech
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./api:/app
+    command: uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+
+  data-ingestion:
+    build: ./data-ingestion
+    environment:
+      - DATABASE_URL=postgresql://credtech_user:credtech_pass@postgres:5432/credtech
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./data-ingestion:/app
+
+  ml-pipeline:
+    build: ./ml-pipeline
+    environment:
+      - DATABASE_URL=postgresql://credtech_user:credtech_pass@postgres:5432/credtech
+      - REDIS_URL=redis://redis:6379
+    depends_on:
+      - postgres
+      - redis
+    volumes:
+      - ./ml-pipeline:/app
+
+  # Frontend
+  frontend:
+    build: ./frontend
+    ports:
+      - "3000:3000"
+    environment:
+      - REACT_APP_API_URL=http://localhost:8000
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
+volumes:
+  postgres_data:
+  redis_data:
