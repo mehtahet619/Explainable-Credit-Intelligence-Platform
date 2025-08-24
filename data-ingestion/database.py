@@ -2,15 +2,22 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 import os
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     def __init__(self):
-        self.database_url = os.getenv("DATABASE_URL", "postgresql://credtech_user:credtech_pass@postgres:5432/credtech")
-        self.engine = create_engine(self.database_url)
+        self.database_url = os.getenv("DATABASE_URL", "sqlite:///data/credtech.db")
+        
+        if "sqlite" in self.database_url:
+            # SQLite configuration
+            self.engine = create_engine(self.database_url, connect_args={"check_same_thread": False})
+        else:
+            # PostgreSQL configuration
+            self.engine = create_engine(self.database_url)
+            
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
     
     def get_session(self):
@@ -36,19 +43,32 @@ class DatabaseManager:
         """Insert market data"""
         try:
             with self.get_session() as session:
-                session.execute(
-                    text("""
-                        INSERT INTO market_data (time, symbol, open_price, high_price, low_price, close_price, volume)
-                        VALUES (:time, :symbol, :open_price, :high_price, :low_price, :close_price, :volume)
-                        ON CONFLICT (time, symbol) DO UPDATE SET
-                            open_price = EXCLUDED.open_price,
-                            high_price = EXCLUDED.high_price,
-                            low_price = EXCLUDED.low_price,
-                            close_price = EXCLUDED.close_price,
-                            volume = EXCLUDED.volume
-                    """),
-                    data
-                )
+                # Check if record exists
+                existing = session.execute(
+                    text("SELECT id FROM market_data WHERE time = :time AND symbol = :symbol"),
+                    {"time": data["time"], "symbol": data["symbol"]}
+                ).fetchone()
+                
+                if existing:
+                    # Update existing record
+                    session.execute(
+                        text("""
+                            UPDATE market_data 
+                            SET open_price = :open_price, high_price = :high_price, 
+                                low_price = :low_price, close_price = :close_price, volume = :volume
+                            WHERE time = :time AND symbol = :symbol
+                        """),
+                        data
+                    )
+                else:
+                    # Insert new record
+                    session.execute(
+                        text("""
+                            INSERT INTO market_data (time, symbol, open_price, high_price, low_price, close_price, volume)
+                            VALUES (:time, :symbol, :open_price, :high_price, :low_price, :close_price, :volume)
+                        """),
+                        data
+                    )
                 session.commit()
         except Exception as e:
             logger.error(f"Error inserting market data: {e}")
@@ -57,16 +77,31 @@ class DatabaseManager:
         """Insert financial data"""
         try:
             with self.get_session() as session:
-                session.execute(
-                    text("""
-                        INSERT INTO financial_data (time, company_id, metric_name, value, source)
-                        VALUES (:time, :company_id, :metric_name, :value, :source)
-                        ON CONFLICT (time, company_id, metric_name) DO UPDATE SET
-                            value = EXCLUDED.value,
-                            source = EXCLUDED.source
-                    """),
-                    data
-                )
+                # Check if record exists
+                existing = session.execute(
+                    text("SELECT id FROM financial_data WHERE time = :time AND company_id = :company_id AND metric_name = :metric_name"),
+                    {"time": data["time"], "company_id": data["company_id"], "metric_name": data["metric_name"]}
+                ).fetchone()
+                
+                if existing:
+                    # Update existing record
+                    session.execute(
+                        text("""
+                            UPDATE financial_data 
+                            SET value = :value, source = :source
+                            WHERE time = :time AND company_id = :company_id AND metric_name = :metric_name
+                        """),
+                        data
+                    )
+                else:
+                    # Insert new record
+                    session.execute(
+                        text("""
+                            INSERT INTO financial_data (time, company_id, metric_name, value, source)
+                            VALUES (:time, :company_id, :metric_name, :value, :source)
+                        """),
+                        data
+                    )
                 session.commit()
         except Exception as e:
             logger.error(f"Error inserting financial data: {e}")
@@ -81,7 +116,7 @@ class DatabaseManager:
                         SELECT id FROM news_events 
                         WHERE company_id = :company_id 
                         AND headline = :headline 
-                        AND timestamp::date = :timestamp::date
+                        AND date(timestamp) = date(:timestamp)
                     """),
                     {
                         "company_id": data["company_id"],
@@ -107,26 +142,43 @@ class DatabaseManager:
         """Update data source status"""
         try:
             with self.get_session() as session:
-                session.execute(
-                    text("""
-                        INSERT INTO data_source_status (source_name, last_update, status, last_error)
-                        VALUES (:source_name, :last_update, :status, :last_error)
-                        ON CONFLICT (source_name) DO UPDATE SET
-                            last_update = EXCLUDED.last_update,
-                            status = EXCLUDED.status,
-                            last_error = EXCLUDED.last_error,
-                            error_count = CASE 
-                                WHEN EXCLUDED.status = 'error' THEN data_source_status.error_count + 1
-                                ELSE 0
-                            END
-                    """),
-                    {
-                        "source_name": source_name,
-                        "last_update": datetime.utcnow(),
-                        "status": status,
-                        "last_error": error
-                    }
-                )
+                # Check if record exists
+                existing = session.execute(
+                    text("SELECT id FROM data_source_status WHERE source_name = :source_name"),
+                    {"source_name": source_name}
+                ).fetchone()
+                
+                if existing:
+                    # Update existing record
+                    session.execute(
+                        text("""
+                            UPDATE data_source_status 
+                            SET last_update = :last_update, status = :status, last_error = :last_error,
+                                error_count = CASE WHEN :status = 'error' THEN error_count + 1 ELSE 0 END
+                            WHERE source_name = :source_name
+                        """),
+                        {
+                            "source_name": source_name,
+                            "last_update": datetime.utcnow(),
+                            "status": status,
+                            "last_error": error
+                        }
+                    )
+                else:
+                    # Insert new record
+                    session.execute(
+                        text("""
+                            INSERT INTO data_source_status (source_name, last_update, status, last_error, error_count)
+                            VALUES (:source_name, :last_update, :status, :last_error, :error_count)
+                        """),
+                        {
+                            "source_name": source_name,
+                            "last_update": datetime.utcnow(),
+                            "status": status,
+                            "last_error": error,
+                            "error_count": 1 if status == 'error' else 0
+                        }
+                    )
                 session.commit()
         except Exception as e:
             logger.error(f"Error updating source status: {e}")
@@ -139,10 +191,10 @@ class DatabaseManager:
                     SELECT metric_name, value, time, source
                     FROM financial_data
                     WHERE company_id = :company_id
-                    AND time >= NOW() - INTERVAL ':days days'
+                    AND time >= :start_date
                     ORDER BY time DESC
                 """),
-                {"company_id": company_id, "days": days}
+                {"company_id": company_id, "start_date": datetime.utcnow() - timedelta(days=days)}
             )
             return [
                 {

@@ -4,8 +4,17 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.model_selection import train_test_split
 from sklearn.metrics import mean_squared_error, r2_score
 from sklearn.preprocessing import StandardScaler
-import xgboost as xgb
-import shap
+try:
+    import xgboost as xgb
+    HAS_XGBOOST = True
+except ImportError:
+    HAS_XGBOOST = False
+
+try:
+    import shap
+    HAS_SHAP = True
+except ImportError:
+    HAS_SHAP = False
 import joblib
 import logging
 from datetime import datetime
@@ -31,15 +40,24 @@ class CreditScoringModel:
             self._create_default_model()
     
     def _create_default_model(self):
-        """Create a default XGBoost model"""
-        self.model = xgb.XGBRegressor(
-            n_estimators=100,
-            max_depth=6,
-            learning_rate=0.1,
-            random_state=42,
-            objective='reg:squarederror'
-        )
-        logger.info("Created default XGBoost model")
+        """Create a default model"""
+        if HAS_XGBOOST:
+            self.model = xgb.XGBRegressor(
+                n_estimators=100,
+                max_depth=6,
+                learning_rate=0.1,
+                random_state=42,
+                objective='reg:squarederror'
+            )
+            logger.info("Created default XGBoost model")
+        else:
+            # Fallback to RandomForest if XGBoost is not available
+            self.model = RandomForestRegressor(
+                n_estimators=100,
+                max_depth=6,
+                random_state=42
+            )
+            logger.info("Created default RandomForest model (XGBoost not available)")
     
     def predict_credit_score(self, features: pd.DataFrame, company_id: int) -> Optional[Dict]:
         """Predict credit score and generate explanations"""
@@ -108,27 +126,31 @@ class CreditScoringModel:
         return max(50.0, min(95.0, confidence))
     
     def _generate_explanations(self, features_scaled: np.ndarray, original_features: pd.DataFrame) -> Dict:
-        """Generate SHAP explanations for the prediction"""
+        """Generate explanations for the prediction"""
         try:
-            if self.explainer is None:
-                # Create SHAP explainer if not exists
-                self.explainer = shap.TreeExplainer(self.model)
-            
-            # Get SHAP values
-            shap_values = self.explainer.shap_values(features_scaled)
-            
-            # Create feature importance dictionary
-            feature_importance = {}
-            
-            for i, feature_name in enumerate(self.feature_names):
-                if i < len(shap_values[0]):
-                    feature_importance[feature_name] = {
-                        'importance': abs(float(shap_values[0][i])),
-                        'shap_value': float(shap_values[0][i]),
-                        'value': float(original_features.iloc[0, i]) if i < len(original_features.columns) else 0.0
-                    }
-            
-            return feature_importance
+            if HAS_SHAP:
+                if self.explainer is None:
+                    # Create SHAP explainer if not exists
+                    self.explainer = shap.TreeExplainer(self.model)
+                
+                # Get SHAP values
+                shap_values = self.explainer.shap_values(features_scaled)
+                
+                # Create feature importance dictionary
+                feature_importance = {}
+                
+                for i, feature_name in enumerate(self.feature_names):
+                    if i < len(shap_values[0]):
+                        feature_importance[feature_name] = {
+                            'importance': abs(float(shap_values[0][i])),
+                            'shap_value': float(shap_values[0][i]),
+                            'value': float(original_features.iloc[0, i]) if i < len(original_features.columns) else 0.0
+                        }
+                
+                return feature_importance
+            else:
+                # Use basic feature importance if SHAP is not available
+                return self._get_basic_feature_importance(original_features)
             
         except Exception as e:
             logger.error(f"Error generating explanations: {e}")
@@ -233,7 +255,8 @@ class CreditScoringModel:
     def save_model(self):
         """Save the trained model"""
         try:
-            os.makedirs('models', exist_ok=True)
+            models_dir = os.path.join(os.path.dirname(__file__), 'models')
+            os.makedirs(models_dir, exist_ok=True)
             
             model_data = {
                 'model': self.model,
@@ -242,7 +265,8 @@ class CreditScoringModel:
                 'model_version': self.model_version
             }
             
-            joblib.dump(model_data, f'models/credit_model_{self.model_version}.pkl')
+            model_path = os.path.join(models_dir, f'credit_model_{self.model_version}.pkl')
+            joblib.dump(model_data, model_path)
             logger.info(f"Model saved: {self.model_version}")
             
         except Exception as e:
@@ -251,12 +275,19 @@ class CreditScoringModel:
     def load_model(self):
         """Load the latest trained model"""
         try:
-            model_files = [f for f in os.listdir('models') if f.startswith('credit_model_') and f.endswith('.pkl')]
+            models_dir = os.path.join(os.path.dirname(__file__), 'models')
+            os.makedirs(models_dir, exist_ok=True)
+            
+            if not os.path.exists(models_dir):
+                return
+                
+            model_files = [f for f in os.listdir(models_dir) if f.startswith('credit_model_') and f.endswith('.pkl')]
             
             if model_files:
                 # Load the latest model
                 latest_model = sorted(model_files)[-1]
-                model_data = joblib.load(f'models/{latest_model}')
+                model_path = os.path.join(models_dir, latest_model)
+                model_data = joblib.load(model_path)
                 
                 self.model = model_data['model']
                 self.scaler = model_data['scaler']
@@ -268,4 +299,5 @@ class CreditScoringModel:
         except Exception as e:
             logger.error(f"Error loading model: {e}")
             # Create models directory if it doesn't exist
-            os.makedirs('models', exist_ok=True)
+            models_dir = os.path.join(os.path.dirname(__file__), 'models')
+            os.makedirs(models_dir, exist_ok=True)

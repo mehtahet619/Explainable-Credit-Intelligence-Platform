@@ -9,8 +9,15 @@ logger = logging.getLogger(__name__)
 
 class DatabaseManager:
     def __init__(self):
-        self.database_url = os.getenv("DATABASE_URL", "postgresql://credtech_user:credtech_pass@postgres:5432/credtech")
-        self.engine = create_engine(self.database_url)
+        self.database_url = os.getenv("DATABASE_URL", "sqlite:///data/credtech.db")
+        
+        if "sqlite" in self.database_url:
+            # SQLite configuration
+            self.engine = create_engine(self.database_url, connect_args={"check_same_thread": False})
+        else:
+            # PostgreSQL configuration
+            self.engine = create_engine(self.database_url)
+            
         self.SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=self.engine)
     
     def get_session(self):
@@ -127,17 +134,31 @@ class DatabaseManager:
         """Insert credit score"""
         try:
             with self.get_session() as session:
-                session.execute(
-                    text("""
-                        INSERT INTO credit_scores (time, company_id, score, confidence, model_version)
-                        VALUES (:time, :company_id, :score, :confidence, :model_version)
-                        ON CONFLICT (time, company_id) DO UPDATE SET
-                            score = EXCLUDED.score,
-                            confidence = EXCLUDED.confidence,
-                            model_version = EXCLUDED.model_version
-                    """),
-                    data
-                )
+                # Check if record exists
+                existing = session.execute(
+                    text("SELECT id FROM credit_scores WHERE time = :time AND company_id = :company_id"),
+                    {"time": data["time"], "company_id": data["company_id"]}
+                ).fetchone()
+                
+                if existing:
+                    # Update existing record
+                    session.execute(
+                        text("""
+                            UPDATE credit_scores 
+                            SET score = :score, confidence = :confidence, model_version = :model_version
+                            WHERE time = :time AND company_id = :company_id
+                        """),
+                        data
+                    )
+                else:
+                    # Insert new record
+                    session.execute(
+                        text("""
+                            INSERT INTO credit_scores (time, company_id, score, confidence, model_version)
+                            VALUES (:time, :company_id, :score, :confidence, :model_version)
+                        """),
+                        data
+                    )
                 session.commit()
         except Exception as e:
             logger.error(f"Error inserting credit score: {e}")
@@ -179,12 +200,16 @@ class DatabaseManager:
         with self.get_session() as session:
             result = session.execute(
                 text("""
-                    SELECT DISTINCT ON (cs.company_id) 
-                        cs.company_id, cs.score, cs.confidence, cs.time, cs.model_version,
-                        c.symbol, c.name, c.sector
+                    SELECT cs.company_id, cs.score, cs.confidence, cs.time, cs.model_version,
+                           c.symbol, c.name, c.sector
                     FROM credit_scores cs
                     JOIN companies c ON cs.company_id = c.id
-                    ORDER BY cs.company_id, cs.time DESC
+                    WHERE cs.time = (
+                        SELECT MAX(time) 
+                        FROM credit_scores cs2 
+                        WHERE cs2.company_id = cs.company_id
+                    )
+                    ORDER BY cs.company_id
                 """)
             )
             return [

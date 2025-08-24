@@ -93,7 +93,7 @@ CREATE TABLE model_performance (
 -- Data source status
 CREATE TABLE data_source_status (
     id SERIAL PRIMARY KEY,
-    source_name VARCHAR(100) NOT NULL,
+    source_name VARCHAR(100) NOT NULL UNIQUE,
     last_update TIMESTAMPTZ,
     status VARCHAR(20) DEFAULT 'active',
     error_count INTEGER DEFAULT 0,

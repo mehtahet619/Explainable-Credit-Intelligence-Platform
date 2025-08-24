@@ -177,8 +177,10 @@ class NewsCollector:
         """Collect from free RSS feeds"""
         import feedparser
         
-        # Google News RSS
-        rss_url = f"https://news.google.com/rss/search?q={company_name}&hl=en-US&gl=US&ceid=US:en"
+        # Google News RSS (URL encode the company name)
+        import urllib.parse
+        encoded_name = urllib.parse.quote(company_name)
+        rss_url = f"https://news.google.com/rss/search?q={encoded_name}&hl=en-US&gl=US&ceid=US:en"
         
         try:
             feed = feedparser.parse(rss_url)

@@ -1,6 +1,7 @@
 import schedule
 import time
 import logging
+import os
 from datetime import datetime
 from data_collectors import (
     YahooFinanceCollector,
@@ -29,12 +30,19 @@ class DataIngestionService:
             companies = self.db.get_all_companies()
             
             for company in companies:
-                self.yahoo_collector.collect_stock_data(company['symbol'])
-                time.sleep(1)  # Rate limiting
+                try:
+                    self.yahoo_collector.collect_stock_data(company['symbol'])
+                    logger.info(f"Collected market data for {company['symbol']}")
+                    time.sleep(1)  # Rate limiting
+                except Exception as e:
+                    logger.error(f"Error collecting market data for {company['symbol']}: {e}")
+                    continue
                 
             logger.info("Market data collection completed")
+            self.update_data_source_status("yahoo_finance", "active")
         except Exception as e:
             logger.error(f"Error in market data collection: {e}")
+            self.update_data_source_status("yahoo_finance", "error", str(e))
     
     def collect_financial_data(self):
         """Collect financial data from Alpha Vantage"""
@@ -42,13 +50,26 @@ class DataIngestionService:
             logger.info("Starting financial data collection...")
             companies = self.db.get_all_companies()
             
+            # Check if Alpha Vantage API key is configured
+            alpha_key = os.getenv('ALPHA_VANTAGE_API_KEY')
+            if not alpha_key or alpha_key == 'demo':
+                logger.warning("Alpha Vantage API key not configured, skipping financial data collection")
+                return
+            
             for company in companies:
-                self.alpha_vantage_collector.collect_financial_data(company['symbol'])
-                time.sleep(12)  # Alpha Vantage rate limit: 5 calls per minute
+                try:
+                    self.alpha_vantage_collector.collect_financial_data(company['symbol'])
+                    logger.info(f"Collected financial data for {company['symbol']}")
+                    time.sleep(12)  # Alpha Vantage rate limit: 5 calls per minute
+                except Exception as e:
+                    logger.error(f"Error collecting financial data for {company['symbol']}: {e}")
+                    continue
                 
             logger.info("Financial data collection completed")
+            self.update_data_source_status("alpha_vantage", "active")
         except Exception as e:
             logger.error(f"Error in financial data collection: {e}")
+            self.update_data_source_status("alpha_vantage", "error", str(e))
     
     def collect_news_data(self):
         """Collect news and sentiment data"""
@@ -56,13 +77,25 @@ class DataIngestionService:
             logger.info("Starting news data collection...")
             companies = self.db.get_all_companies()
             
+            # Check if News API key is configured
+            news_key = os.getenv('NEWS_API_KEY')
+            if not news_key or news_key == 'demo':
+                logger.warning("News API key not configured, using RSS feeds only")
+            
             for company in companies:
-                self.news_collector.collect_company_news(company['symbol'], company['name'])
-                time.sleep(2)  # Rate limiting
+                try:
+                    self.news_collector.collect_company_news(company['symbol'], company['name'])
+                    logger.info(f"Collected news data for {company['symbol']}")
+                    time.sleep(2)  # Rate limiting
+                except Exception as e:
+                    logger.error(f"Error collecting news data for {company['symbol']}: {e}")
+                    continue
                 
             logger.info("News data collection completed")
+            self.update_data_source_status("news_api", "active")
         except Exception as e:
             logger.error(f"Error in news data collection: {e}")
+            self.update_data_source_status("news_api", "error", str(e))
     
     def collect_sec_data(self):
         """Collect SEC filing data"""
