@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Decimal, Boolean, ForeignKey, BigInteger, Text
+from sqlalchemy import Column, Integer, String, DateTime, Boolean, ForeignKey, BigInteger, Text, Numeric
 from sqlalchemy.orm import relationship
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy import create_engine
@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DATABASE_URL = os.getenv("DATABASE_URL", "postgresql://credtech_user:credtech_pass@localhost:5432/credtech")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///../credit_scoring.db")
 
 engine = create_engine(DATABASE_URL)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -37,8 +37,8 @@ class CreditScore(Base):
     
     time = Column(DateTime, primary_key=True)
     company_id = Column(Integer, ForeignKey("companies.id"), primary_key=True)
-    score = Column(Decimal(5,2), nullable=False)
-    confidence = Column(Decimal(5,2))
+    score = Column(Numeric(5,2), nullable=False)
+    confidence = Column(Numeric(5,2))
     model_version = Column(String(50))
     
     # Relationships
@@ -51,9 +51,9 @@ class FeatureImportance(Base):
     company_id = Column(Integer, ForeignKey("companies.id"))
     timestamp = Column(DateTime, nullable=False)
     feature_name = Column(String(100), nullable=False)
-    importance_value = Column(Decimal(10,6), nullable=False)
-    shap_value = Column(Decimal(10,6))
-    feature_value = Column(Decimal(15,6))
+    importance_value = Column(Numeric(10,6), nullable=False)
+    shap_value = Column(Numeric(10,6))
+    feature_value = Column(Numeric(15,6))
     
     # Relationships
     company = relationship("Company", back_populates="feature_importance")
@@ -64,7 +64,7 @@ class FinancialData(Base):
     time = Column(DateTime, primary_key=True)
     company_id = Column(Integer, ForeignKey("companies.id"), primary_key=True)
     metric_name = Column(String(100), primary_key=True)
-    value = Column(Decimal(20,6))
+    value = Column(Numeric(20,6))
     source = Column(String(50))
 
 class NewsEvent(Base):
@@ -76,8 +76,8 @@ class NewsEvent(Base):
     headline = Column(Text, nullable=False)
     content = Column(Text)
     source = Column(String(100))
-    sentiment_score = Column(Decimal(5,2))
-    impact_score = Column(Decimal(5,2))
+    sentiment_score = Column(Numeric(5,2))
+    impact_score = Column(Numeric(5,2))
     event_type = Column(String(50))
     processed = Column(Boolean, default=False)
     
@@ -89,10 +89,10 @@ class MarketData(Base):
     
     time = Column(DateTime, primary_key=True)
     symbol = Column(String(10), primary_key=True)
-    open_price = Column(Decimal(15,6))
-    high_price = Column(Decimal(15,6))
-    low_price = Column(Decimal(15,6))
-    close_price = Column(Decimal(15,6))
+    open_price = Column(Numeric(15,6))
+    high_price = Column(Numeric(15,6))
+    low_price = Column(Numeric(15,6))
+    close_price = Column(Numeric(15,6))
     volume = Column(BigInteger)
 
 class ModelPerformance(Base):
@@ -101,10 +101,10 @@ class ModelPerformance(Base):
     id = Column(Integer, primary_key=True, index=True)
     model_version = Column(String(50), nullable=False)
     timestamp = Column(DateTime, nullable=False)
-    accuracy = Column(Decimal(5,4))
-    precision_score = Column(Decimal(5,4))
-    recall = Column(Decimal(5,4))
-    f1_score = Column(Decimal(5,4))
+    accuracy = Column(Numeric(5,4))
+    precision_score = Column(Numeric(5,4))
+    recall = Column(Numeric(5,4))
+    f1_score = Column(Numeric(5,4))
     training_samples = Column(Integer)
     validation_samples = Column(Integer)
 
